@@ -1,0 +1,100 @@
+---
+- name: Configure deployment instance
+  hosts: web
+  become: yes
+  vars:
+    app_dir: /home/ubuntu/app
+    
+  tasks:
+    - name: Wait for system to be ready
+      wait_for_connection:
+        timeout: 300
+        delay: 5
+        
+    - name: Ensure system is fully booted
+      command: systemctl is-system-running
+      register: system_status
+      until: system_status.stdout.find("running") != -1 or system_status.stdout.find("degraded") != -1
+      retries: 30
+      delay: 10
+      ignore_errors: yes
+      
+    - name: Update apt cache
+      apt:
+        update_cache: yes
+        
+    - name: Install Docker
+      apt:
+        name:
+          - docker.io
+          - docker-compose
+        state: present
+        
+    - name: Start Docker service
+      systemd:
+        name: docker
+        state: started
+        enabled: yes
+        
+    - name: Add ubuntu user to docker group
+      user:
+        name: ubuntu
+        groups: docker
+        append: yes
+      
+    - name: Wait for Docker service to be ready
+      command: docker info
+      register: docker_status
+      until: docker_status.rc == 0
+      retries: 10
+      delay: 5
+      become_user: ubuntu
+      
+    - name: Install Git
+      apt:
+        name: git
+        state: present
+        
+    - name: Create app directory
+      file:
+        path: "{{ app_dir }}"
+        state: directory
+        mode: '0755'
+        owner: ubuntu
+        group: ubuntu
+        
+    - name: Clone repository
+      git:
+        repo: "{{ repo_url }}"
+        dest: "{{ app_dir }}"
+        version: "{{ branch }}"
+        force: yes
+      become_user: ubuntu
+      register: git_result
+      retries: 3
+      delay: 5
+      
+    - name: Show git clone result
+      debug:
+        msg: "Git clone result: {{ git_result }}"
+        
+    - name: Create .env file
+      copy:
+        content: |
+          {% for key, value in env_vars.items() %}
+          {{ key }}={{ value }}
+          {% endfor %}
+        dest: "{{ app_dir }}/.env"
+        owner: ubuntu
+        group: ubuntu
+        mode: '0644'
+      when: env_vars is defined and env_vars | length > 0
+      
+    - name: Verify Docker is working for ubuntu user
+      command: docker ps
+      become_user: ubuntu
+      register: docker_test
+      
+    - name: Show Docker test result
+      debug:
+        msg: "Docker test successful: {{ docker_test.stdout }}"

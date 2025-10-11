@@ -1,0 +1,74 @@
+---
+- name: Build application
+  hosts: all
+  become: yes
+  vars:
+    app_dir: /home/ubuntu/app
+  tasks:
+    # Debug: List files in app directory
+    - name: List files in app directory
+      shell: ls -la {{ app_dir }}
+      register: app_files
+      
+    - name: Show app directory contents
+      debug:
+        msg: "App directory contents: {{ app_files.stdout }}"
+        
+    # Always validate Docker files exist in the app directory
+    - name: Verify Dockerfile exists
+      stat:
+        path: "{{ app_dir }}/Dockerfile"
+      register: dockerfile_check
+      
+    - name: Show Dockerfile status
+      debug:
+        msg: "Dockerfile exists: {{ dockerfile_check.stat.exists }}"
+      
+    - name: Verify docker-compose.yml exists
+      stat:
+        path: "{{ app_dir }}/docker-compose.yml"
+      register: compose_check
+      
+    - name: Show docker-compose.yml status
+      debug:
+        msg: "docker-compose.yml exists: {{ compose_check.stat.exists }}"
+    
+    # Try to find alternative Docker files
+    - name: Check for alternative docker-compose files
+      find:
+        paths: "{{ app_dir }}"
+        patterns: "docker-compose*.yml,docker-compose*.yaml,compose.yml,compose.yaml"
+      register: compose_files
+      
+    - name: Show found compose files
+      debug:
+        msg: "Found compose files: {{ compose_files.files | map(attribute='path') | list }}"
+        
+    - name: Fail if no Docker files found
+      fail:
+        msg: "No Dockerfile found in {{ app_dir }}. Please ensure your project has a Dockerfile."
+      when: not dockerfile_check.stat.exists
+        
+    - name: Fail if no compose files found
+      fail:
+        msg: "No docker-compose.yml found in {{ app_dir }}. Found files: {{ app_files.stdout }}. Please ensure your project has a docker-compose.yml file."
+      when: not compose_check.stat.exists and compose_files.matched == 0
+        
+    # Build using docker-compose (this handles everything)
+    - name: Build application with docker-compose
+      shell: |
+        cd {{ app_dir }}
+        echo "Building application in: $(pwd)"
+        echo "Using compose file: docker-compose.yml"
+        docker-compose build --no-cache
+      become_user: ubuntu
+      register: build_result
+      
+    - name: Show build output
+      debug:
+        msg: "Build output: {{ build_result.stdout }}"
+        
+    - name: Show build errors if any
+      debug:
+        msg: "Build errors: {{ build_result.stderr }}"
+      when: build_result.stderr is defined and build_result.stderr != ""

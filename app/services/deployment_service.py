@@ -71,44 +71,96 @@ class DeploymentService:
         if deployment_id in self._deployment_locks:
             del self._deployment_locks[deployment_id]
     
+    async def _wait_for_instance_boot(self, deployment: Deployment, host: str, initial_wait: int = 60):
+        """Wait for instance to fully boot before attempting SSH connections"""
+        self._log(deployment, f"⏰ Instance created, waiting {initial_wait} seconds for full boot...")
+        self._log_verbose(deployment, "This initial wait ensures the instance is fully booted before SSH attempts")
+        
+        # Initial wait for instance to boot
+        await asyncio.sleep(initial_wait)
+        
+        # Additional checks to ensure instance is responding
+        self._log(deployment, "🔍 Verifying instance is responding...")
+        
+        # Check if instance is responding to ping (basic connectivity)
+        for attempt in range(1, 6):  # 5 attempts over 30 seconds
+            try:
+                self._log_verbose(deployment, f"Ping check attempt {attempt}/5")
+                
+                # Use ping command to check basic connectivity
+                ping_cmd = ["ping", "-c", "1", "-W", "5", host]  # 5 second timeout
+                result = subprocess.run(ping_cmd, capture_output=True, text=True, timeout=10)
+                
+                if result.returncode == 0:
+                    self._log(deployment, f"✓ Instance is responding to ping")
+                    return
+                else:
+                    self._log_verbose(deployment, f"Ping failed (attempt {attempt}): {result.stderr}")
+                    
+            except subprocess.TimeoutExpired:
+                self._log_verbose(deployment, f"Ping timeout (attempt {attempt})")
+            except Exception as e:
+                self._log_verbose(deployment, f"Ping error (attempt {attempt}): {e}")
+            
+            if attempt < 5:
+                self._log_verbose(deployment, f"Waiting 6 seconds before next ping attempt...")
+                await asyncio.sleep(6)
+        
+        # Even if ping fails, continue - SSH might still work
+        self._log(deployment, "⚠️ Ping checks failed, but proceeding with SSH connection attempt")
+        self._log_verbose(deployment, "This is normal for some cloud providers - SSH may still work")
+    
     async def _wait_for_ssh_ready(self, deployment: Deployment, host: str, port: int = 22, timeout: int = 180):
-        """Wait for SSH to be ready on the instance - non-blocking approach"""
-        self._log(deployment, f"Checking SSH connectivity to {host}:{port}")
+        """Wait for SSH to be ready on the instance with detailed diagnostics"""
+        self._log(deployment, f"🔐 Checking SSH connectivity to {host}:{port}")
+        self._log_verbose(deployment, "SSH connection diagnostics will help identify any issues")
         
         start_time = datetime.utcnow()
         attempt = 0
-        max_attempts = 15  # Reduced max attempts
+        max_attempts = 20  # Increased attempts since we now wait for boot first
+        
+        # First, check if SSH key exists
+        import os
+        if not os.path.exists("/tmp/deploy_key"):
+            self._log(deployment, "❌ SSH key not found at /tmp/deploy_key")
+            raise Exception("SSH key not found - cannot proceed with SSH connection")
+        
+        self._log_verbose(deployment, "✓ SSH key found at /tmp/deploy_key")
         
         while attempt < max_attempts and (datetime.utcnow() - start_time).total_seconds() < timeout:
             attempt += 1
             try:
-                # Use a much shorter timeout for individual connection attempts
                 self._log_verbose(deployment, f"SSH check attempt {attempt}/{max_attempts}")
                 
-                # Create a separate task for the connection check to avoid blocking
+                # Step 1: Check if SSH port is open
+                self._log_verbose(deployment, f"Checking if SSH port {port} is open...")
                 sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                sock.settimeout(3)  # Very short timeout
+                sock.settimeout(5)  # Slightly longer timeout for port check
                 result = sock.connect_ex((host, port))
                 sock.close()
                 
                 if result == 0:
                     self._log(deployment, f"✓ SSH port {port} is open on {host}")
                     
-                    # Quick SSH auth test with very short timeout
+                    # Step 2: Test SSH authentication
+                    self._log_verbose(deployment, f"Testing SSH authentication...")
                     try:
                         ssh_test_cmd = [
-                            "timeout", "5",  # Use system timeout command
+                            "timeout", "10",  # 10 second timeout for SSH test
                             "ssh", 
                             "-i", "/tmp/deploy_key",
                             "-o", "StrictHostKeyChecking=no",
                             "-o", "UserKnownHostsFile=/dev/null",
-                            "-o", "ConnectTimeout=3",
+                            "-o", "ConnectTimeout=5",
                             "-o", "BatchMode=yes",
+                            "-o", "LogLevel=ERROR",  # Reduce SSH verbosity
                             f"ubuntu@{host}",
-                            "echo 'SSH ready'"
+                            "echo 'SSH_AUTH_SUCCESS'"
                         ]
                         
-                        # Run SSH test asynchronously with very short timeout
+                        self._log_verbose(deployment, f"Running SSH test: {' '.join(ssh_test_cmd)}")
+                        
+                        # Run SSH test asynchronously
                         process = await asyncio.create_subprocess_exec(
                             *ssh_test_cmd,
                             stdout=asyncio.subprocess.PIPE,
@@ -118,42 +170,59 @@ class DeploymentService:
                         try:
                             stdout, stderr = await asyncio.wait_for(
                                 process.communicate(), 
-                                timeout=8
+                                timeout=15  # 15 second total timeout
                             )
                             
-                            if process.returncode == 0:
+                            stdout_str = stdout.decode('utf-8').strip()
+                            stderr_str = stderr.decode('utf-8').strip()
+                            
+                            if process.returncode == 0 and 'SSH_AUTH_SUCCESS' in stdout_str:
                                 self._log(deployment, f"✓ SSH authentication successful to {host}")
+                                self._log_verbose(deployment, f"SSH response: {stdout_str}")
                                 return
                             else:
                                 self._log_verbose(deployment, f"SSH auth failed (attempt {attempt})")
+                                self._log_verbose(deployment, f"SSH stdout: {stdout_str}")
+                                self._log_verbose(deployment, f"SSH stderr: {stderr_str}")
+                                self._log_verbose(deployment, f"SSH return code: {process.returncode}")
+                                
                         except asyncio.TimeoutError:
                             process.kill()
-                            self._log_verbose(deployment, f"SSH test timed out (attempt {attempt})")
+                            self._log_verbose(deployment, f"SSH test timed out after 15 seconds (attempt {attempt})")
                             
                     except Exception as e:
-                        self._log_verbose(deployment, f"SSH test error: {e}")
-                        # Don't fail here, just continue to Ansible which has its own retry logic
-                        if attempt >= 5:  # After 5 attempts, assume SSH works if port is open
-                            self._log(deployment, "Port is open, proceeding with deployment")
-                            return
+                        self._log_verbose(deployment, f"SSH test error (attempt {attempt}): {e}")
                         
                 else:
-                    self._log_verbose(deployment, f"SSH port not ready, code {result} (attempt {attempt})")
+                    # Port is not open - provide detailed error info
+                    error_codes = {
+                        35: "Network unreachable",
+                        61: "Connection refused (SSH service not running)",
+                        110: "Connection timed out",
+                        111: "Connection refused (port not open)"
+                    }
+                    error_msg = error_codes.get(result, f"Unknown error code: {result}")
+                    self._log_verbose(deployment, f"SSH port not ready: {error_msg} (code {result}, attempt {attempt})")
                     
             except Exception as e:
                 self._log_verbose(deployment, f"Connection check error (attempt {attempt}): {e}")
             
-            # Much shorter wait times
-            if attempt <= 5:
-                wait_time = 3  # First 5 attempts wait 3 seconds
+            # Progressive wait times - longer waits for later attempts
+            if attempt <= 3:
+                wait_time = 5  # First 3 attempts wait 5 seconds
+            elif attempt <= 8:
+                wait_time = 10  # Next 5 attempts wait 10 seconds
             else:
-                wait_time = 5  # Later attempts wait 5 seconds max
+                wait_time = 15  # Later attempts wait 15 seconds
                 
             self._log_verbose(deployment, f"Waiting {wait_time}s before next attempt...")
             await asyncio.sleep(wait_time)
         
-        # Don't fail completely - let Ansible handle SSH connectivity with its own retries
-        self._log(deployment, f"SSH readiness check completed after {attempt} attempts. Proceeding with configuration (Ansible will retry if needed).")
+        # Provide detailed failure information
+        elapsed_time = (datetime.utcnow() - start_time).total_seconds()
+        self._log(deployment, f"⚠️ SSH readiness check completed after {attempt} attempts ({elapsed_time:.1f}s)")
+        self._log_verbose(deployment, "Proceeding with Ansible configuration - it has its own SSH retry logic")
+        self._log_verbose(deployment, "Common SSH issues: instance still booting, firewall rules, SSH key permissions")
     
     def _update_status(self, deployment: Deployment, status: DeploymentStatus):
         """Update deployment status"""
@@ -216,6 +285,7 @@ class DeploymentService:
             
             # Wait for instance to be ready for SSH connections
             self._log(deployment, "⏳ Waiting for instance to be ready...")
+            await self._wait_for_instance_boot(deployment, instance_info["public_ip"])
             await self._wait_for_ssh_ready(deployment, instance_info["public_ip"])
             
             # 2. Configure instance with Ansible

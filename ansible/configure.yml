@@ -42,8 +42,17 @@
         groups: docker
         append: yes
       
+    - name: Reset SSH connection to pickup new group membership
+      meta: reset_connection
+      
     - name: Wait for Docker service to be ready
-      command: docker info
+      shell: |
+        # First try direct access, then fall back to sg command
+        if docker info >/dev/null 2>&1; then
+          docker info
+        else
+          sg docker -c "docker info"
+        fi
       register: docker_status
       until: docker_status.rc == 0
       retries: 10
@@ -91,7 +100,13 @@
       when: env_vars is defined and env_vars | length > 0
       
     - name: Verify Docker is working for ubuntu user
-      command: docker ps
+      shell: |
+        # Try docker ps with current session, then fall back to sg
+        if docker ps >/dev/null 2>&1; then
+          docker ps
+        else
+          sg docker -c "docker ps"
+        fi
       become_user: ubuntu
       register: docker_test
       

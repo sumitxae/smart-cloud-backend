@@ -145,8 +145,8 @@ class DeploymentService:
                     # Step 2: Test SSH authentication
                     self._log_verbose(deployment, f"Testing SSH authentication...")
                     try:
+                        # Use direct SSH command without timeout wrapper (macOS doesn't have GNU timeout)
                         ssh_test_cmd = [
-                            "timeout", "10",  # 10 second timeout for SSH test
                             "ssh", 
                             "-i", "/tmp/deploy_key",
                             "-o", "StrictHostKeyChecking=no",
@@ -160,7 +160,7 @@ class DeploymentService:
                         
                         self._log_verbose(deployment, f"Running SSH test: {' '.join(ssh_test_cmd)}")
                         
-                        # Run SSH test asynchronously
+                        # Run SSH test asynchronously with Python timeout
                         process = await asyncio.create_subprocess_exec(
                             *ssh_test_cmd,
                             stdout=asyncio.subprocess.PIPE,
@@ -170,7 +170,7 @@ class DeploymentService:
                         try:
                             stdout, stderr = await asyncio.wait_for(
                                 process.communicate(), 
-                                timeout=15  # 15 second total timeout
+                                timeout=10  # 10 second timeout for SSH test
                             )
                             
                             stdout_str = stdout.decode('utf-8').strip()
@@ -188,7 +188,7 @@ class DeploymentService:
                                 
                         except asyncio.TimeoutError:
                             process.kill()
-                            self._log_verbose(deployment, f"SSH test timed out after 15 seconds (attempt {attempt})")
+                            self._log_verbose(deployment, f"SSH test timed out after 10 seconds (attempt {attempt})")
                             
                     except Exception as e:
                         self._log_verbose(deployment, f"SSH test error (attempt {attempt}): {e}")

@@ -41,24 +41,17 @@
         name: ubuntu
         groups: docker
         append: yes
+      register: user_group_result
       
-    - name: Reset SSH connection to pickup new group membership
-      meta: reset_connection
+    - name: Show user group update result
+      debug:
+        msg: "User group updated: {{ user_group_result.changed }}"
       
-    - name: Wait for Docker service to be ready
-      shell: |
-        # First try direct access, then fall back to sg command
-        if docker info >/dev/null 2>&1; then
-          docker info
-        else
-          sg docker -c "docker info"
-        fi
-      register: docker_status
-      until: docker_status.rc == 0
-      retries: 10
-      delay: 5
-      become_user: ubuntu
-      
+    # Note: We don't force reset SSH connection because it causes issues
+    # Instead, we'll use 'sg docker' command in subsequent playbooks
+    # This allows docker commands to run with the docker group even though
+    # the SSH session hasn't picked up the new group membership yet
+    
     - name: Install Git
       apt:
         name: git
@@ -99,17 +92,16 @@
         mode: '0644'
       when: env_vars is defined and env_vars | length > 0
       
-    - name: Verify Docker is working for ubuntu user
+    - name: Verify Docker service is running
       shell: |
-        # Try docker ps with current session, then fall back to sg
-        if docker ps >/dev/null 2>&1; then
-          docker ps
-        else
-          sg docker -c "docker ps"
-        fi
+        # Use sg docker to ensure group permissions work even on first run
+        sg docker -c "docker info" > /dev/null 2>&1 && echo "Docker OK" || echo "Docker check failed"
       become_user: ubuntu
       register: docker_test
+      retries: 5
+      delay: 3
+      until: docker_test.stdout.find("Docker OK") != -1
       
     - name: Show Docker test result
       debug:
-        msg: "Docker test successful: {{ docker_test.stdout }}"
+        msg: "Docker test result: {{ docker_test.stdout }}"

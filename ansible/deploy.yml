@@ -5,19 +5,19 @@
   vars:
     app_dir: /home/ubuntu/app
   tasks:
-    # Stop existing containers
+    # Stop existing containers using sg docker
     - name: Stop existing containers
       shell: |
         cd {{ app_dir }}
-        docker-compose down || true
+        sg docker -c "cd {{ app_dir }} && docker-compose down" || true
       become_user: ubuntu
       ignore_errors: yes
       
-    # Start application with docker-compose
+    # Start application with docker-compose using sg docker
     - name: Start application with docker-compose
       shell: |
         cd {{ app_dir }}
-        docker-compose up -d
+        sg docker -c "cd {{ app_dir }} && docker-compose up -d"
       become_user: ubuntu
         
     # Wait a moment for containers to start
@@ -29,7 +29,7 @@
     - name: Verify containers are running
       shell: |
         cd {{ app_dir }}
-        docker-compose ps
+        sg docker -c "cd {{ app_dir }} && docker-compose ps"
       become_user: ubuntu
       register: compose_status
       

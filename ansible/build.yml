@@ -54,19 +54,14 @@
         msg: "No docker-compose.yml found in {{ app_dir }}. Found files: {{ app_files.stdout }}. Please ensure your project has a docker-compose.yml file."
       when: not compose_check.stat.exists and compose_files.matched == 0
         
-    # Build using docker-compose (this handles everything)
+    # Build using docker-compose with sg to ensure group permissions
     - name: Build application with docker-compose
       shell: |
         cd {{ app_dir }}
         echo "Building application in: $(pwd)"
         echo "Using compose file: docker-compose.yml"
-        # Try docker-compose directly, then with sg if needed
-        if docker-compose build --no-cache 2>/dev/null; then
-          echo "Docker-compose build successful"
-        else
-          echo "Trying with sg docker group..."
-          sg docker -c "docker-compose build --no-cache"
-        fi
+        # Use sg docker to ensure group permissions are active (works on first deployment)
+        sg docker -c "cd {{ app_dir }} && docker-compose build --no-cache"
       become_user: ubuntu
       register: build_result
       

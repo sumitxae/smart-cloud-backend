@@ -8,11 +8,13 @@ class User(Base):
     __tablename__ = "users"
     
     id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
-    github_id = Column(String, unique=True, nullable=False, index=True)
+    github_id = Column(String, unique=True, nullable=True, index=True)
+    gitlab_id = Column(String, unique=True, nullable=True, index=True)
     username = Column(String, nullable=False)
     email = Column(String, nullable=True)
     avatar_url = Column(String, nullable=True)
-    access_token = Column(String, nullable=False)
+    github_access_token = Column(String, nullable=True)
+    gitlab_access_token = Column(String, nullable=True)
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)

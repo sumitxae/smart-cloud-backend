@@ -63,7 +63,7 @@ async def start_deployment(
         deployment_service.execute_deployment,
         deployment.id,
         project,
-        current_user.access_token,
+        current_user.github_access_token,
         deployment_data.branch
     )
     
@@ -116,7 +116,7 @@ async def retry_deployment(
         deployment_service.execute_redeployment,
         deployment.id,
         project,
-        current_user.access_token,
+        current_user.github_access_token,
         deployment  # Pass the deployment itself for reuse
     )
     
@@ -189,7 +189,7 @@ async def redeploy_project(
         deployment_service.execute_redeployment,
         new_deployment.id,
         project,
-        current_user.access_token,
+        current_user.github_access_token,
         existing_deployment  # Pass existing deployment for reuse
     )
     

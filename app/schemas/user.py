@@ -8,12 +8,15 @@ class UserBase(BaseModel):
     avatar_url: Optional[str] = None
 
 class UserCreate(UserBase):
-    github_id: str
-    access_token: str
+    github_id: Optional[str] = None
+    gitlab_id: Optional[str] = None
+    github_access_token: Optional[str] = None
+    gitlab_access_token: Optional[str] = None
 
 class User(UserBase):
     id: str
-    github_id: str
+    github_id: Optional[str] = None
+    gitlab_id: Optional[str] = None
     is_active: bool
     created_at: datetime
     
@@ -21,4 +24,5 @@ class User(UserBase):
         from_attributes = True
 
 class UserInDB(User):
-    access_token: str
+    github_access_token: Optional[str] = None
+    gitlab_access_token: Optional[str] = None

@@ -8,12 +8,17 @@ class Settings(BaseSettings):
     # Security
     SECRET_KEY: str
     ALGORITHM: str = "HS256"
-    ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 1440  # 24 hours
     
     # GitHub OAuth
     GITHUB_CLIENT_ID: str
     GITHUB_CLIENT_SECRET: str
     GITHUB_REDIRECT_URI: str
+    
+    # GitLab OAuth
+    GITLAB_CLIENT_ID: Optional[str] = None
+    GITLAB_CLIENT_SECRET: Optional[str] = None
+    GITLAB_REDIRECT_URI: Optional[str] = None
     
     # Frontend
     FRONTEND_URL: str = "http://localhost:5173"

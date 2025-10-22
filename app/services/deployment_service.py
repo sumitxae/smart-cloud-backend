@@ -295,9 +295,14 @@ class DeploymentService:
             ansible_service = AnsibleService()
             
             # Pass callback for real-time logging
+            # Use the stored repo_url from the project, which should be the correct URL
+            repo_url = project.repo_url
+            if not repo_url.endswith('.git'):
+                repo_url += '.git'
+            
             await ansible_service.configure_instance(
                 host=instance_info["public_ip"],
-                repo_url=f"https://github.com/{project.repo_full_name}.git",
+                repo_url=repo_url,
                 branch=branch,
                 env_vars=deployment.env_vars,
                 framework=project.framework,
@@ -401,9 +406,14 @@ class DeploymentService:
             self._update_status(deployment, DeploymentStatus.CONFIGURING)
             
             ansible_service = AnsibleService()
+            # Use the stored repo_url from the project, which should be the correct URL
+            repo_url = project.repo_url
+            if not repo_url.endswith('.git'):
+                repo_url += '.git'
+            
             await ansible_service.configure_instance(
                 host=existing_deployment.public_ip,
-                repo_url=f"https://github.com/{project.repo_full_name}.git",
+                repo_url=repo_url,
                 branch=deployment.branch,
                 env_vars=deployment.env_vars,
                 framework=project.framework,

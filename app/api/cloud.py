@@ -95,6 +95,51 @@ async def save_credentials(
     
     return {"message": f"{credentials.provider.upper()} credentials saved successfully"}
 
+@router.get("/credentials/{provider}")
+async def get_credentials(
+    provider: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Get cloud provider credentials"""
+    account = db.query(CloudAccount).filter(
+        CloudAccount.user_id == current_user.id,
+        CloudAccount.provider == provider,
+        CloudAccount.is_active == True
+    ).first()
+    
+    if not account:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"No credentials found for {provider}"
+        )
+    
+    credentials = json.loads(account.credentials_encrypted)
+    return {"provider": provider, "credentials": credentials}
+
+@router.delete("/credentials/{provider}")
+async def delete_credentials(
+    provider: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Delete cloud provider credentials"""
+    account = db.query(CloudAccount).filter(
+        CloudAccount.user_id == current_user.id,
+        CloudAccount.provider == provider
+    ).first()
+    
+    if not account:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"No credentials found for {provider}"
+        )
+    
+    account.is_active = False
+    db.commit()
+    
+    return {"message": f"{provider.upper()} credentials deleted successfully"}
+
 @router.get("/providers/{provider}/regions")
 async def get_provider_regions(
     provider: str,

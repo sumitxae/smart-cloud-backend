@@ -7,6 +7,7 @@ from ..models import User, Project
 from ..schemas import Project as ProjectSchema, ProjectCreate, ProjectUpdate
 from .deps import get_current_user
 from ..services.github_service import GitHubService
+from ..services.gitlab_service import GitLabService
 
 router = APIRouter()
 
@@ -26,11 +27,20 @@ async def create_project(
     db: Session = Depends(get_db)
 ):
     """Create a new project"""
-    # Verify user has access to repo
-    github_service = GitHubService(current_user.access_token)
+    # Determine which service to use based on user's authentication
+    service = None
+    if current_user.github_access_token:
+        service = GitHubService(current_user.github_access_token)
+    elif current_user.gitlab_access_token:
+        service = GitLabService(current_user.gitlab_access_token)
+    else:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No access token available. Please authenticate with GitHub or GitLab first."
+        )
     
     try:
-        repo_info = await github_service.get_repo_info(project_data.repo_full_name)
+        repo_info = await service.get_repo_info(project_data.repo_full_name)
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -39,8 +49,8 @@ async def create_project(
     
     # Check if project has required Docker files
     try:
-        has_dockerfile = await github_service.check_file_exists(project_data.repo_full_name, "Dockerfile", project_data.branch)
-        has_compose = await github_service.check_file_exists(project_data.repo_full_name, "docker-compose.yml", project_data.branch)
+        has_dockerfile = await service.check_file_exists(project_data.repo_full_name, "Dockerfile", project_data.branch)
+        has_compose = await service.check_file_exists(project_data.repo_full_name, "docker-compose.yml", project_data.branch)
         
         if not has_dockerfile:
             raise HTTPException(
@@ -65,7 +75,7 @@ async def create_project(
     # Detect framework if not provided
     framework = project_data.project_type
     if not framework:
-        framework = await github_service.detect_framework(project_data.repo_full_name)
+        framework = await service.detect_framework(project_data.repo_full_name)
     
     project = Project(
         user_id=current_user.id,
